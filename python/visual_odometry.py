@@ -103,6 +103,10 @@ class VisualOdometry(object):
         kp1, desc1 = self.feature_extractor.detectAndCompute(image1, None)
         kp2, desc2 = self.feature_extractor.detectAndCompute(image2, None)
 
+        if desc1 is None or desc2 is None or len(desc1) == 0 or len(desc2) == 0:
+            print(f"No descriptors found between frame {frame-1} and frame {frame}")
+            return None, None
+
         matches = self.matcher.knnMatch(desc1, desc2, k=2)
         if not matches:
             print(f"No matches found between frame {frame-1} and frame {frame}")
@@ -111,7 +115,7 @@ class VisualOdometry(object):
         # Apply Lowe's ratio test to find good matches (Keep matches with distance ratio < distance ratio threshold)
         good = []
         for m,n in matches:
-            if m.distance < 0.8 * n.distance:
+            if m.distance < 0.65 * n.distance:
                 good.append(m)
 
 
@@ -193,10 +197,18 @@ class VisualOdometry(object):
         
         uhom_Q1 = hom_Q1[:3, :] / hom_Q1[3, :]
         uhom_Q2 = (T @ hom_Q1)[:3, :] / hom_Q1[3, :]
+        if np.any(np.isnan(uhom_Q1)) or np.any(np.isnan(uhom_Q2)) or np.any(np.isinf(uhom_Q1)) or np.any(np.isinf(uhom_Q2)):
+            print("Triangulation resulted in invalid (NaN or Inf) values.")
+            return 1.0
         valid_mask = ~np.isnan(uhom_Q1).any(axis=0) & ~np.isnan(uhom_Q2).any(axis=0)
         if valid_mask.sum() < 2:
-            raise ValueError("Insufficient valid triangulated points for scale calculation.")
-
+            print("Insufficient valid triangulated points for scale calculation.")
+            return 1.0
+        uhom_Q1_valid = uhom_Q1[:, valid_mask]
+        uhom_Q2_valid = uhom_Q2[:, valid_mask]
+        if uhom_Q1_valid.shape[1] < 5:
+            print(f"Warning: Not enough valid triangulated points for scale calculation between frames.")
+            return 1.0
         relative_scale = np.mean(np.linalg.norm(uhom_Q1.T[:-1] - uhom_Q1.T[1:], axis=-1) / 
                                 np.linalg.norm(uhom_Q2.T[:-1] - uhom_Q2.T[1:], axis=-1))
 
@@ -227,11 +239,11 @@ class VisualOdometry(object):
 
 
 if __name__ == "__main__":
-    data_dir = "../data/dataset/sequences/02"
+    data_dir = "../data/dataset/sequences/01"
     vo = VisualOdometry(
         data_dir,
         max_limit=50,
-        feature_extractor=cv2.ORB_create(2000)
+        feature_extractor=cv2.ORB_create(1000),
         )
     print(f"Intrinsic camera parameters is K = \n{vo.K}")
     print(f"Number of images in {data_dir}: {len(vo.images)}")
